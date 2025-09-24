@@ -8,6 +8,10 @@ import pandas as pd
 import plotly.express as px
 import os
 
+# NEW imports for webcam streaming
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import av
+
 # Load YOLOv8 model
 model = YOLO("yolov8n.pt")  # lightweight model for speed
 
@@ -106,35 +110,29 @@ elif upload_type == "Video":
                          title="Object Count Distribution", color="Object")
             st.plotly_chart(fig, use_container_width=True)
 
-# ---------------- WEBCAM REAL-TIME ----------------
+# ---------------- WEBCAM REAL-TIME (with streamlit-webrtc) ----------------
 elif upload_type == "Webcam":
-    st.write("🎥 Starting webcam... (press **Stop** to end)")
-    cap = cv2.VideoCapture(0)
-    stframe = st.empty()
-    detected_list = []
+    st.subheader("🎥 Live Webcam Detection")
 
-    stop_button = st.button("🛑 Stop Webcam")
-    while cap.isOpened() and not stop_button:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    class VideoProcessor(VideoProcessorBase):
+        def __init__(self):
+            self.detected_list = []
 
-        results = model.predict(frame, conf=confidence)
-        annotated_frame = results[0].plot()
-        stframe.image(annotated_frame, channels="BGR", use_container_width=True)
+        def recv(self, frame):
+            img = frame.to_ndarray(format="bgr24")
 
-        # Track detections
-        detected_classes = filter_detections(results)
-        detected_list.extend(detected_classes)
+            # Run YOLO detection
+            results = model.predict(img, conf=confidence)
+            img = results[0].plot()
 
-    cap.release()
+            # Track detections
+            detected_classes = filter_detections(results)
+            self.detected_list.extend(detected_classes)
 
-    # Show summary after stopping webcam
-    if detected_list:
-        counts = pd.Series(detected_list).value_counts().reset_index()
-        counts.columns = ["Object", "Count"]
-        st.subheader("📊 Webcam Session Summary")
-        st.dataframe(counts, use_container_width=True)
-        fig = px.bar(counts, x="Object", y="Count", text="Count",
-                     title="Object Count Distribution", color="Object")
-        st.plotly_chart(fig, use_container_width=True)
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+    webrtc_streamer(
+        key="object-detection",
+        video_processor_factory=VideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+    )
