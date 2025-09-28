@@ -24,7 +24,7 @@ st.write("This app lets you **detect objects**, **count them**, and **visualize 
 st.sidebar.header("⚙️ Detection Settings")
 confidence = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5, 0.05)
 
-# Object filter (Stage 5)
+# Object filter
 all_classes = list(model.names.values())
 selected_object = st.sidebar.selectbox("🎯 Select object to detect (or 'All')", ["All"] + all_classes)
 
@@ -85,13 +85,17 @@ elif upload_type == "Video":
         stframe = st.empty()
         detected_list = []
 
+        # Play video frame by frame
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
+            # Run YOLO detection
             results = model.predict(frame, conf=confidence)
             annotated_frame = results[0].plot()
+
+            # Display video in real-time
             stframe.image(annotated_frame, channels="BGR", use_container_width=True)
 
             # Track detections for statistics
