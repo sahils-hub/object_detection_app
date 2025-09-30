@@ -76,6 +76,7 @@ if upload_type == "Image":
                 st.download_button("📥 Download Processed Image", f, file_name="detections.jpg")
 
 # ---------------- VIDEO UPLOAD ----------------
+# ---------------- VIDEO UPLOAD ----------------
 elif upload_type == "Video":
     uploaded_video = st.file_uploader("🎬 Upload a Video", type=["mp4", "avi", "mov"])
     if uploaded_video:
@@ -88,17 +89,20 @@ elif upload_type == "Video":
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         delay = 1 / fps if fps > 0 else 0.03  # default ~30fps
 
-        # Slider UI
-        frame_slider = st.slider("📍 Video Position", 0, total_frames - 1, 0, 1)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_slider)
-
+        # Placeholder for slider and video
         stframe = st.empty()
         slider_placeholder = st.empty()
         detected_list = []
 
-        # Play video from current position automatically
-        current_frame = frame_slider
+        current_frame = 0  # start from frame 0
+
         while cap.isOpened() and current_frame < total_frames:
+            # Read slider value; if user moved it, jump to that frame
+            slider_value = slider_placeholder.slider("📍 Video Position", 0, total_frames - 1, current_frame)
+            if slider_value != current_frame:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, slider_value)
+                current_frame = slider_value
+
             ret, frame = cap.read()
             if not ret:
                 break
@@ -113,10 +117,6 @@ elif upload_type == "Video":
             # Track detections
             detected_classes = filter_detections(results)
             detected_list.extend(detected_classes)
-
-            # Update slider dynamically
-            slider_placeholder.slider("📍 Video Position", 0, total_frames - 1,
-                                      current_frame, 1, key="progress", disabled=True)
 
             current_frame += 1
             time.sleep(delay)  # maintain normal playback speed
@@ -159,3 +159,4 @@ elif upload_type == "Webcam":
         video_processor_factory=VideoProcessor,
         media_stream_constraints={"video": True, "audio": False},
     )
+
