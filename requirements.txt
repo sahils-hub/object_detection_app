@@ -6,3 +6,4 @@ pandas
 plotly
 streamlit-webrtc
 av
+numpy
