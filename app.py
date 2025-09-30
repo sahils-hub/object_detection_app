@@ -11,6 +11,7 @@ import os
 # NEW imports for webcam streaming
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import av
+import time
 
 # Load YOLOv8 model
 model = YOLO("yolov8n.pt")  # lightweight model for speed
@@ -82,11 +83,22 @@ elif upload_type == "Video":
         tfile.write(uploaded_video.read())
         cap = cv2.VideoCapture(tfile.name)
 
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        delay = 1 / fps if fps > 0 else 0.03  # default ~30fps
+
+        # Slider UI
+        frame_slider = st.slider("📍 Video Position", 0, total_frames - 1, 0, 1)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_slider)
+
         stframe = st.empty()
+        slider_placeholder = st.empty()
         detected_list = []
 
-        # Play video frame by frame
-        while cap.isOpened():
+        # Play video from current position
+        current_frame = frame_slider
+        while cap.isOpened() and current_frame < total_frames:
             ret, frame = cap.read()
             if not ret:
                 break
@@ -95,12 +107,19 @@ elif upload_type == "Video":
             results = model.predict(frame, conf=confidence)
             annotated_frame = results[0].plot()
 
-            # Display video in real-time
+            # Display video frame
             stframe.image(annotated_frame, channels="BGR", use_container_width=True)
 
-            # Track detections for statistics
+            # Track detections
             detected_classes = filter_detections(results)
             detected_list.extend(detected_classes)
+
+            # Update slider dynamically
+            slider_placeholder.slider("📍 Video Position", 0, total_frames - 1,
+                                      current_frame, 1, key="progress", disabled=True)
+
+            current_frame += 1
+            time.sleep(delay)  # maintain playback speed
 
         cap.release()
 
