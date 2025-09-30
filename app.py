@@ -2,160 +2,103 @@ import streamlit as st
 import cv2
 import tempfile
 from ultralytics import YOLO
-from PIL import Image
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import os
 
-# NEW imports for webcam streaming
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-import av
-import time
+# Load the YOLO model once
+model = YOLO("yolov8n.pt")
 
-# Load YOLOv8 model
-model = YOLO("yolov8n.pt")  # lightweight model for speed
+st.title("Object Detection App")
 
-# ---------------- APP HEADER ----------------
-st.set_page_config(page_title="Object Detection App", layout="wide")
-st.title("🕵️ Object Detection and Counting App")
-st.write("This app lets you **detect objects**, **count them**, and **visualize results** in real-time using YOLOv8.")
+# Sidebar options
+option = st.sidebar.selectbox("Choose Input Type", ["Image", "Video", "Webcam"])
 
-# ---------------- SIDEBAR SETTINGS ----------------
-st.sidebar.header("⚙️ Detection Settings")
-confidence = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5, 0.05)
 
-# Object filter
-all_classes = list(model.names.values())
-selected_object = st.sidebar.selectbox("🎯 Select object to detect (or 'All')", ["All"] + all_classes)
+# ================= Image Section =================
+if option == "Image":
+    st.subheader("Upload an Image")
 
-# Let user choose input type
-upload_type = st.radio("Choose input type:", ["Image", "Video", "Webcam"])
+    uploaded_image = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
-# ---------------- HELPER FUNCTION ----------------
-def filter_detections(results):
-    """Filter detections based on selected object"""
-    detected_classes = [model.names[int(c)] for c in results[0].boxes.cls]
-    if selected_object != "All":
-        detected_classes = [obj for obj in detected_classes if obj == selected_object]
-    return detected_classes
+    if uploaded_image is not None:
+        file_bytes = uploaded_image.read()
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_file.write(file_bytes)
+        image_path = temp_file.name
 
-# ---------------- IMAGE UPLOAD ----------------
-if upload_type == "Image":
-    uploaded_image = st.file_uploader("📷 Upload an Image", type=["jpg", "png", "jpeg"])
-    if uploaded_image:
-        image = Image.open(uploaded_image)
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+        image = cv2.imread(image_path)
 
-        # Run YOLO model
-        results = model.predict(np.array(image), conf=confidence)
+        results = model(image)
+        annotated_image = results[0].plot()
 
-        # Draw detections
-        res_plotted = results[0].plot()
-        st.image(res_plotted, caption="Detections", use_container_width=True)
+        st.image(annotated_image, channels="BGR", use_column_width=True)
 
-        # Count detected objects
-        detected_classes = filter_detections(results)
-        if detected_classes:
-            counts = pd.Series(detected_classes).value_counts().reset_index()
-            counts.columns = ["Object", "Count"]
 
-            # Show table
-            st.subheader("📊 Detection Results")
-            st.dataframe(counts, use_container_width=True)
+# ================= Video Section =================
+elif option == "Video":
+    st.subheader("Upload a Video")
 
-            # Show bar chart
-            fig = px.bar(counts, x="Object", y="Count", text="Count",
-                         title="Object Count Distribution", color="Object")
-            st.plotly_chart(fig, use_container_width=True)
+    uploaded_video = st.file_uploader("Choose a video...", type=["mp4", "avi", "mov"])
 
-            # Save processed image for download
-            out_path = "processed_image.jpg"
-            cv2.imwrite(out_path, res_plotted)
-            with open(out_path, "rb") as f:
-                st.download_button("📥 Download Processed Image", f, file_name="detections.jpg")
+    if uploaded_video is not None:
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_file.write(uploaded_video.read())
+        video_path = temp_file.name
 
-# ---------------- VIDEO UPLOAD ----------------
-elif upload_type == "Video":
-    uploaded_video = st.file_uploader("🎬 Upload a Video", type=["mp4", "avi", "mov"])
-    if uploaded_video:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_video.read())
-        cap = cv2.VideoCapture(tfile.name)
-
-        # Get video properties
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap = cv2.VideoCapture(video_path)
         fps = int(cap.get(cv2.CAP_PROP_FPS))
-        delay = 1 / fps if fps > 0 else 0.03  # default ~30fps
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames // fps if fps > 0 else 0
 
-        # Slider UI
-        frame_slider = st.slider("📍 Video Position", 0, total_frames - 1, 0, 1)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_slider)
+        # Skip slider
+        skip_seconds = st.slider("Skip to (seconds)", 0, duration, 0)
+
+        # Set video to start at skip position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, skip_seconds * fps)
 
         stframe = st.empty()
-        slider_placeholder = st.empty()
-        detected_list = []
 
-        # Play video from current position
-        current_frame = frame_slider
-        while cap.isOpened() and current_frame < total_frames:
+        # Inject JS to force autoplay
+        st.markdown(
+            """
+            <script>
+            var video = window.parent.document.querySelector('video');
+            if(video) {
+                video.play();
+            }
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            # Run YOLO detection
-            results = model.predict(frame, conf=confidence)
+            results = model(frame)
             annotated_frame = results[0].plot()
 
-            # Display video frame
-            stframe.image(annotated_frame, channels="BGR", use_container_width=True)
-
-            # Track detections
-            detected_classes = filter_detections(results)
-            detected_list.extend(detected_classes)
-
-            # Update slider dynamically
-            slider_placeholder.slider("📍 Video Position", 0, total_frames - 1,
-                                      current_frame, 1, key="progress", disabled=True)
-
-            current_frame += 1
-            time.sleep(delay)  # maintain playback speed
+            stframe.image(annotated_frame, channels="BGR", use_column_width=True)
 
         cap.release()
 
-        # Show summary counts after video ends
-        if detected_list:
-            counts = pd.Series(detected_list).value_counts().reset_index()
-            counts.columns = ["Object", "Count"]
-            st.subheader("📊 Final Detection Summary")
-            st.dataframe(counts, use_container_width=True)
-            fig = px.bar(counts, x="Object", y="Count", text="Count",
-                         title="Object Count Distribution", color="Object")
-            st.plotly_chart(fig, use_container_width=True)
 
-# ---------------- WEBCAM REAL-TIME (with streamlit-webrtc) ----------------
-elif upload_type == "Webcam":
-    st.subheader("🎥 Live Webcam Detection")
+# ================= Webcam Section =================
+elif option == "Webcam":
+    st.subheader("Webcam Live Feed")
+    run = st.checkbox("Run")
+    stframe = st.empty()
 
-    class VideoProcessor(VideoProcessorBase):
-        def __init__(self):
-            self.detected_list = []
+    cap = cv2.VideoCapture(0)
 
-        def recv(self, frame):
-            img = frame.to_ndarray(format="bgr24")
+    while run:
+        ret, frame = cap.read()
+        if not ret:
+            st.write("Failed to capture from webcam.")
+            break
 
-            # Run YOLO detection
-            results = model.predict(img, conf=confidence)
-            img = results[0].plot()
+        results = model(frame)
+        annotated_frame = results[0].plot()
 
-            # Track detections
-            detected_classes = filter_detections(results)
-            self.detected_list.extend(detected_classes)
+        stframe.image(annotated_frame, channels="BGR", use_column_width=True)
 
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-    webrtc_streamer(
-        key="object-detection",
-        video_processor_factory=VideoProcessor,
-        media_stream_constraints={"video": True, "audio": False},
-    )
+    cap.release()
